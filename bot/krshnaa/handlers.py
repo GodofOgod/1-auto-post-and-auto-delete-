@@ -27,6 +27,8 @@ from .broadcaster import (
     receive_broadcast_message
 )
 
+logger = setup_logger(__name__)
+
 class PostState(StatesGroup):
     WaitingForChannel = State()
     WaitingForMessage = State()
