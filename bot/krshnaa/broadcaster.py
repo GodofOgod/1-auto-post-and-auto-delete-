@@ -3,7 +3,8 @@
 # Contact  : @FTKrshna
 
 import asyncio
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from aiogram import types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -144,17 +145,55 @@ async def handle_broadcast_choice(callback_query: types.CallbackQuery, state: FS
 
     elif callback_query.data == "broadcast_schedule":
         await callback_query.message.edit_text(
-            "Please send the **date & time** for scheduling (Format: `YYYY-MM-DD HH:MM` in 24h).",
+            "Please send the schedule time.\n\n"
+            "✅ Examples:\n"
+            "- `10m` (10 minutes)\n"
+            "- `1h` (1 hour)\n"
+            "- `1day` (1 day)\n"
+            "- `20-08-2025 5m` (20th Aug + 5 minutes)\n"
+            "- `2025-08-20 15:30` (exact date & time)\n",
             parse_mode="Markdown"
         )
         await BroadcastState.WaitingForScheduleTime.set()
 
 # ========================= RECEIVE SCHEDULE =========================
 async def receive_schedule_time(message: types.Message, state: FSMContext):
+    text = message.text.strip().lower()
+    schedule_time = None
+
     try:
-        schedule_time = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
-    except ValueError:
-        await message.reply("❌ Invalid format. Use: YYYY-MM-DD HH:MM (24h). Example: 2025-08-20 15:30")
+        # ✅ Relative only (10m, 1h, 1day)
+        match = re.match(r"^(\d+)(m|h|day|d)$", text)
+        if match:
+            val, unit = int(match.group(1)), match.group(2)
+            if unit == "m":
+                schedule_time = datetime.utcnow() + timedelta(minutes=val)
+            elif unit == "h":
+                schedule_time = datetime.utcnow() + timedelta(hours=val)
+            elif unit in ["day", "d"]:
+                schedule_time = datetime.utcnow() + timedelta(days=val)
+
+        # ✅ Date + offset (20-08-2025 5m)
+        elif re.match(r"^\d{2}-\d{2}-\d{4}\s+\d+(m|h|day|d)$", text):
+            date_part, offset = text.split(maxsplit=1)
+            base_date = datetime.strptime(date_part, "%d-%m-%Y")
+            val, unit = int(re.findall(r"\d+", offset)[0]), re.findall(r"[a-z]+", offset)[0]
+            if unit == "m":
+                schedule_time = base_date + timedelta(minutes=val)
+            elif unit == "h":
+                schedule_time = base_date + timedelta(hours=val)
+            elif unit in ["day", "d"]:
+                schedule_time = base_date + timedelta(days=val)
+
+        # ✅ Full datetime
+        else:
+            schedule_time = datetime.strptime(text, "%Y-%m-%d %H:%M")
+
+    except Exception:
+        pass
+
+    if not schedule_time:
+        await message.reply("❌ Invalid format. Try:\n`10m`, `1h`, `1day`, `20-08-2025 5m`, or `2025-08-20 15:30`")
         return
 
     data = await state.get_data()
