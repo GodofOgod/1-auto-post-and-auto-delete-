@@ -1,19 +1,15 @@
-# © 2025 FtKrishna. All rights reserved.
-# Channel  : https://t.me/NxMirror
-# Contact  : @FTKrshna
-
 import os
 
 # Telegram Bot Token from @Botfather
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "7726282640:ABCD")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8356551419:AAGFZnpBbEaYeUh-t2CP-XGU3gMazpHX_pw")
 
 # List of authorized user IDs (Admins)
-AUTHORIZED_USERS = list(map(int, os.environ.get("AUTHORIZED_USERS", "12345678,87654321").split(",")))
+AUTHORIZED_USERS = list(map(int, os.environ.get("AUTHORIZED_USERS", "1397269319").split(",")))      #For Example 123456,123456
 
 # MongoDB URL and DB name
-DB_URL = os.environ.get("DB_URL", "mongodb+srv://username:password@cluster.mongodb.net")
-DB_NAME = os.environ.get("DB_NAME", "NxMirror")
+DB_URL = os.environ.get("DB_URL", "mongodb+srv://wemedia360:Ex3pPKO0PNBWcI6k@channelbroadcastbot.pqhuvuc.mongodb.net/?retryWrites=true&w=majority&appName=Channelbroadcastbot")
+DB_NAME = os.environ.get("DB_NAME", "Channelbroadcastbot")
 
 # Optional: List of default Telegram channels)
 # You can add unlimited channel directy from bot)
-DEFAULT_CHANNELS = list(map(int, os.environ.get("DEFAULT_CHANNELS", "-1001234567890,-1009876543210").split(",")))
+DEFAULT_CHANNELS = list(map(int, os.environ.get("DEFAULT_CHANNELS", "-1002805570628").split(",")))      #-1001234567890,-1009876543210  For Example
