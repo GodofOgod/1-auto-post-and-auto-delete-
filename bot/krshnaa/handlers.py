@@ -1014,7 +1014,7 @@ def register_handlers(dp: Dispatcher):
             EditState.WaitingForContent,
             EditState.WaitingForButtons,
             EditState.WaitingForPreview,
-            BroadcastState.waiting_for_message,   # ✅ fixed
+            BroadcastState.WaitingForMessage,   # ✅ correct
             DefaultButtonsState.WaitingForButtons
         ]
     )
