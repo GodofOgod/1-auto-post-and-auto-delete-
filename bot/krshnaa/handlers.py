@@ -27,8 +27,6 @@ from .broadcaster import (
     receive_broadcast_message
 )
 
-logger = setup_logger(__name__)
-
 class PostState(StatesGroup):
     WaitingForChannel = State()
     WaitingForMessage = State()
@@ -495,7 +493,6 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
                     reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
                 )
                 await PostState.WaitingForButtons.set()
-
         elif flow == "edit":
             if current_state == EditState.WaitingForMessageId.state:
                 channels = await get_channels_for_selection(callback_query.bot)
@@ -523,16 +520,27 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
                     reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
                 )
                 await EditState.WaitingForButtons.set()
-
+        elif flow == "broadcast":
+            if current_state == BroadcastState.WaitingForButtons.state:
+                await callback_query.message.edit_text(
+                    "Please send the message you want to broadcast (text, media, or media with captions).",
+                    reply_markup=create_channel_selection_keyboard([], show_back=False, show_close=True)
+                )
+                await BroadcastState.WaitingForMessage.set()
+            elif current_state == BroadcastState.WaitingForPreview.state:
+                await callback_query.message.edit_text(
+                    FtKrshna.DEFAULT_BUTTONS_TEXT,
+                    parse_mode=types.ParseMode.MARKDOWN,
+                    reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
+                )
+                await BroadcastState.WaitingForButtons.set()
         elif current_state == DefaultButtonsState.WaitingForButtons.state:
             await callback_query.message.edit_text(
                 "Manage your default buttons:",
                 reply_markup=create_default_buttons_keyboard()
             )
             await state.finish()
-
         await callback_query.answer()
-
     except TelegramAPIError as e:
         await callback_query.message.reply("Error navigating back.")
         logger.error(f"TelegramAPIError in back_action: {str(e)}")
@@ -540,7 +548,6 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
         await callback_query.message.reply("Error navigating back.")
         logger.error(f"Unexpected error in back_action: {str(e)}")
         await state.finish()
-
 
 async def cancel_action(callback_query: types.CallbackQuery, state: FSMContext):
     logger.info(f"Received cancel_action callback from user {callback_query.from_user.id}")
