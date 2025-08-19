@@ -495,6 +495,7 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
                     reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
                 )
                 await PostState.WaitingForButtons.set()
+
         elif flow == "edit":
             if current_state == EditState.WaitingForMessageId.state:
                 channels = await get_channels_for_selection(callback_query.bot)
@@ -522,27 +523,16 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
                     reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
                 )
                 await EditState.WaitingForButtons.set()
-        elif flow == "broadcast":
-            if current_state == BroadcastState.WaitingForButtons.state:
-                await callback_query.message.edit_text(
-                    "Please send the message you want to broadcast (text, media, or media with captions).",
-                    reply_markup=create_channel_selection_keyboard([], show_back=False, show_close=True)
-                )
-                await BroadcastState.WaitingForMessage.set()
-            elif current_state == BroadcastState.WaitingForPreview.state:
-                await callback_query.message.edit_text(
-                    FtKrshna.DEFAULT_BUTTONS_TEXT,
-                    parse_mode=types.ParseMode.MARKDOWN,
-                    reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
-                )
-                await BroadcastState.WaitingForButtons.set()
+
         elif current_state == DefaultButtonsState.WaitingForButtons.state:
             await callback_query.message.edit_text(
                 "Manage your default buttons:",
                 reply_markup=create_default_buttons_keyboard()
             )
             await state.finish()
+
         await callback_query.answer()
+
     except TelegramAPIError as e:
         await callback_query.message.reply("Error navigating back.")
         logger.error(f"TelegramAPIError in back_action: {str(e)}")
@@ -550,6 +540,7 @@ async def back_action(callback_query: types.CallbackQuery, state: FSMContext):
         await callback_query.message.reply("Error navigating back.")
         logger.error(f"Unexpected error in back_action: {str(e)}")
         await state.finish()
+
 
 async def cancel_action(callback_query: types.CallbackQuery, state: FSMContext):
     logger.info(f"Received cancel_action callback from user {callback_query.from_user.id}")
@@ -976,6 +967,7 @@ def register_handlers(dp: Dispatcher):
     dp.register_message_handler(broadcast_command, commands=["broadcast"])
     dp.register_message_handler(set_default_buttons_command, commands=["setdefaultbtns"])
     dp.register_message_handler(cancel_command, commands=["cancel"])
+
     dp.register_callback_query_handler(
         start_button_callback,
         lambda c: c.data in [
@@ -1013,9 +1005,7 @@ def register_handlers(dp: Dispatcher):
             EditState.WaitingForContent,
             EditState.WaitingForButtons,
             EditState.WaitingForPreview,
-            BroadcastState.WaitingForMessage,
-            BroadcastState.WaitingForButtons,
-            BroadcastState.WaitingForPreview,
+            BroadcastState.waiting_for_message,   # ✅ fixed
             DefaultButtonsState.WaitingForButtons
         ]
     )
@@ -1030,14 +1020,10 @@ def register_handlers(dp: Dispatcher):
         state="*"
     )
     dp.register_callback_query_handler(debug_callback)
+
     dp.register_message_handler(
         receive_post_message,
-        content_types=[
-            types.ContentType.TEXT,
-            types.ContentType.PHOTO,
-            types.ContentType.VIDEO,
-            types.ContentType.DOCUMENT
-        ],
+        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
         state=PostState.WaitingForMessage
     )
     dp.register_message_handler(
@@ -1048,12 +1034,7 @@ def register_handlers(dp: Dispatcher):
     dp.register_message_handler(receive_message_id, state=EditState.WaitingForMessageId)
     dp.register_message_handler(
         receive_edit_content,
-        content_types=[
-            types.ContentType.TEXT,
-            types.ContentType.PHOTO,
-            types.ContentType.VIDEO,
-            types.ContentType.DOCUMENT
-        ],
+        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
         state=EditState.WaitingForContent
     )
     dp.register_message_handler(
@@ -1063,19 +1044,11 @@ def register_handlers(dp: Dispatcher):
     )
     dp.register_message_handler(
         receive_broadcast_message,
-        content_types=[
-            types.ContentType.TEXT,
-            types.ContentType.PHOTO,
-            types.ContentType.VIDEO,
-            types.ContentType.DOCUMENT
-        ],
-        state=BroadcastState.WaitingForMessage
+        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
+        state=BroadcastState.waiting_for_message   # ✅ fixed
     )
-    dp.register_message_handler(
-        receive_broadcast_buttons,
-        content_types=[types.ContentType.TEXT],
-        state=BroadcastState.WaitingForButtons
-    )
+    # ❌ removed receive_broadcast_buttons (doesn’t exist anymore)
+
     dp.register_message_handler(
         receive_default_buttons,
         content_types=[types.ContentType.TEXT],
@@ -1091,11 +1064,8 @@ def register_handlers(dp: Dispatcher):
         lambda c: c.data in ["confirm_post", "cancel_action"],
         state=EditState.WaitingForPreview
     )
-    dp.register_callback_query_handler(
-        handle_broadcast_confirmation,
-        lambda c: c.data in ["confirm_post", "cancel_action"],
-        state=BroadcastState.WaitingForPreview
-    )
+    # ❌ removed handle_broadcast_confirmation (BroadcastState.WaitingForPreview doesn’t exist)
+
     dp.register_callback_query_handler(
         button_callback,
         lambda c: c.data.startswith(("popup:", "alert:"))
