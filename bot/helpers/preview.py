@@ -86,7 +86,7 @@ async def send_to_channel(
     channel_id: int,
     edit_message_id: int = None,
     keep_content: bool = False,
-    delete_after: int = None   # ⬅️ NEW: optional auto-delete time (seconds)
+    delete_after: int = DELETE_TIME   # ⬅️ default from info.py
 ):
     logger.info(
         f"Sending to channel_id={channel_id}, edit_message_id={edit_message_id}, "
