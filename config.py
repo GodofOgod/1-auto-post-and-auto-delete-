@@ -1,4 +1,5 @@
 import os
+from os import environ
 
 # Telegram Bot Token from @Botfather
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8356551419:AAGFZnpBbEaYeUh-t2CP-XGU3gMazpHX_pw")
