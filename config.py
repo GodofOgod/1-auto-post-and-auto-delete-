@@ -13,3 +13,5 @@ DB_NAME = os.environ.get("DB_NAME", "Channelbroadcastbot")
 # Optional: List of default Telegram channels)
 # You can add unlimited channel directy from bot)
 DEFAULT_CHANNELS = list(map(int, os.environ.get("DEFAULT_CHANNELS", "-1002805570628").split(",")))      #-1001234567890,-1009876543210  For Example
+
+DELETE_TIME = int(environ.get("DELETE_TIME", "300"))  #  deletion time in seconds (default: 5 minutes). Adjust as per your needs.
