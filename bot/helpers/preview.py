@@ -7,7 +7,7 @@ from bot.logger import setup_logger
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, InputMediaDocument
 from aiogram.utils.exceptions import TelegramAPIError
-from info import DELETE_TIME
+from config import DELETE_TIME
 
 logger = setup_logger(__name__)
 
