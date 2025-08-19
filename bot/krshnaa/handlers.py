@@ -1030,6 +1030,32 @@ def register_handlers(dp: Dispatcher):
     )
     dp.register_callback_query_handler(debug_callback)
 
+    # ------------------------
+    # 🚀 BROADCAST HANDLERS
+    # ------------------------
+    dp.register_message_handler(
+        receive_broadcast_message,
+        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
+        state=BroadcastState.WaitingForMessage
+    )
+
+    # ✅ NEW: Send Now / Schedule choice
+    dp.register_callback_query_handler(
+        handle_broadcast_choice,
+        lambda c: c.data in ["broadcast_send_now", "broadcast_schedule"],
+        state=BroadcastState.WaitingForMessage
+    )
+
+    # ✅ NEW: Schedule time input
+    dp.register_message_handler(
+        receive_schedule_time,
+        content_types=[types.ContentType.TEXT],
+        state=BroadcastState.WaitingForScheduleTime
+    )
+
+    # ------------------------
+    # OTHER EXISTING HANDLERS
+    # ------------------------
     dp.register_message_handler(
         receive_post_message,
         content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
@@ -1052,13 +1078,6 @@ def register_handlers(dp: Dispatcher):
         state=EditState.WaitingForButtons
     )
     dp.register_message_handler(
-        receive_broadcast_message,
-        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
-        state=BroadcastState.WaitingForMessage   # ✅ fixed
-    )
-    # ❌ removed receive_broadcast_buttons (doesn’t exist anymore)
-
-    dp.register_message_handler(
         receive_default_buttons,
         content_types=[types.ContentType.TEXT],
         state=DefaultButtonsState.WaitingForButtons
@@ -1073,8 +1092,6 @@ def register_handlers(dp: Dispatcher):
         lambda c: c.data in ["confirm_post", "cancel_action"],
         state=EditState.WaitingForPreview
     )
-    # ❌ removed handle_broadcast_confirmation (BroadcastState.WaitingForPreview doesn’t exist)
-
     dp.register_callback_query_handler(
         button_callback,
         lambda c: c.data.startswith(("popup:", "alert:"))
