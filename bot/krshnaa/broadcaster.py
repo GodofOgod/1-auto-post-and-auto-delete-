@@ -3,10 +3,13 @@
 # Contact  : @FTKrshna
 
 import asyncio
+from datetime import datetime
 from aiogram import types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.utils.exceptions import TelegramAPIError
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 from bot.logger import setup_logger
 from ..helpers import is_authorized, send_preview, send_to_channel
 from ..modules import mongo_db
@@ -14,9 +17,12 @@ from config import DEFAULT_CHANNELS, DELETE_TIME
 
 logger = setup_logger(__name__)
 
+# ========================= STATES =========================
 class BroadcastState(StatesGroup):
     WaitingForMessage = State()
+    WaitingForScheduleTime = State()
 
+# ========================= COMMAND =========================
 async def broadcast_command(message: types.Message, state: FSMContext, from_button=False, user_id=None):
     logger.info(f"Received /broadcast from user {user_id or message.from_user.id} (from_button={from_button})")
     effective_user_id = user_id or message.from_user.id
@@ -37,6 +43,7 @@ async def broadcast_command(message: types.Message, state: FSMContext, from_butt
         logger.error(f"Error in /broadcast: {str(e)}")
         await state.finish()
 
+# ========================= CHANNELS =========================
 async def get_all_channels(bot):
     db_channels = await mongo_db.get_channels()
     channels = db_channels if db_channels else []
@@ -61,6 +68,7 @@ async def get_all_channels(bot):
         logger.info("DEFAULT_CHANNELS not defined, using only database channels")
     return channels
 
+# ========================= RECEIVE BROADCAST =========================
 async def receive_broadcast_message(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     if message.from_user.id != user_data.get("user_id"):
@@ -94,48 +102,90 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
     try:
         await state.update_data(content=content)
 
-        # Show preview to admin
+        # Show preview
         preview_message = await send_preview(message.bot, content, None, message.chat.id)
         if DELETE_TIME > 0:
             asyncio.create_task(delete_after_delay(message.bot, preview_message.chat.id, preview_message.message_id))
 
-        # Immediately broadcast to all channels
-        channels = await get_all_channels(message.bot)
-        if not channels:
-            msg = await message.reply("No channels available for broadcasting.")
-            if DELETE_TIME > 0:
-                asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
-            await state.finish()
-            return
+        # Ask for choice
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("📤 Send Now", callback_data="broadcast_send_now"),
+            InlineKeyboardButton("⏰ Schedule", callback_data="broadcast_schedule")
+        )
+        await message.reply("Do you want to send now or schedule this broadcast?", reply_markup=keyboard)
 
-        success_count = 0
-        failed_channels = []
-        for channel in channels:
-            channel_id = channel["channel_id"]
-            try:
-                sent_msg = await send_to_channel(message.bot, content, None, channel_id)
-                success_count += 1
-
-                if sent_msg and DELETE_TIME > 0:
-                    asyncio.create_task(delete_after_delay(message.bot, channel_id, sent_msg.message_id))
-            except TelegramAPIError as e:
-                failed_channels.append((channel_id, str(e)))
-
-        response = f"✅ Broadcast completed: {success_count}/{len(channels)} successful."
-        if failed_channels:
-            response += "\n❌ Failed:\n" + "\n".join(f"{ch[0]}: {ch[1]}" for ch in failed_channels)
-
-        msg = await message.reply(response)
-        if DELETE_TIME > 0:
-            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
-
-        await state.finish()
     except Exception as e:
         await message.reply("Error processing broadcast.")
-        logger.error(f"Error: {e}")
+        logger.error(f"Error in receive_broadcast_message: {str(e)}")
         await state.finish()
 
-# ✅ Helper for delayed deletion
+# ========================= HANDLE CHOICE =========================
+async def handle_broadcast_choice(callback_query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    content = data.get("content")
+
+    if callback_query.data == "broadcast_send_now":
+        # Send immediately
+        channels = await get_all_channels(callback_query.bot)
+        success, fail = 0, []
+        for channel in channels:
+            try:
+                await send_to_channel(callback_query.bot, content, None, channel["channel_id"])
+                success += 1
+            except TelegramAPIError as e:
+                fail.append((channel["channel_id"], str(e)))
+
+        result = f"✅ Broadcast completed: {success}/{len(channels)} successful."
+        if fail:
+            result += "\n❌ Failed:\n" + "\n".join(f"{c}: {err}" for c, err in fail)
+
+        await callback_query.message.edit_text(result)
+        await state.finish()
+
+    elif callback_query.data == "broadcast_schedule":
+        await callback_query.message.edit_text(
+            "Please send the **date & time** for scheduling (Format: `YYYY-MM-DD HH:MM` in 24h).",
+            parse_mode="Markdown"
+        )
+        await BroadcastState.WaitingForScheduleTime.set()
+
+# ========================= RECEIVE SCHEDULE =========================
+async def receive_schedule_time(message: types.Message, state: FSMContext):
+    try:
+        schedule_time = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+    except ValueError:
+        await message.reply("❌ Invalid format. Use: YYYY-MM-DD HH:MM (24h). Example: 2025-08-20 15:30")
+        return
+
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    content = data.get("content")
+
+    schedule_id = await mongo_db.save_schedule(user_id, content, schedule_time)
+    if schedule_id:
+        await message.reply(f"✅ Broadcast scheduled for {schedule_time}")
+    else:
+        await message.reply("❌ Failed to schedule broadcast.")
+
+    await state.finish()
+
+# ========================= SCHEDULE WORKER =========================
+async def schedule_worker(bot):
+    while True:
+        now = datetime.utcnow()
+        schedules = await mongo_db.get_due_schedules(now)
+        for sched in schedules:
+            content = sched["content"]
+            channels = await get_all_channels(bot)
+            for channel in channels:
+                try:
+                    await send_to_channel(bot, content, None, channel["channel_id"])
+                except Exception as e:
+                    logger.error(f"Failed schedule {sched['_id']} -> {channel['channel_id']}: {e}")
+            await mongo_db.mark_done(str(sched["_id"]))
+        await asyncio.sleep(30)  # check every 30 sec
+
+# ========================= DELETE HELPER =========================
 async def delete_after_delay(bot, chat_id, message_id):
     try:
         await asyncio.sleep(DELETE_TIME)
