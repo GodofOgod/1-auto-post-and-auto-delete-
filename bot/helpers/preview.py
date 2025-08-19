@@ -2,6 +2,7 @@
 # Channel  : https://t.me/NxMirror
 # Contact  : @FTKrshna
 
+import asyncio
 from bot.logger import setup_logger
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto, InputMediaVideo, InputMediaDocument
@@ -9,8 +10,18 @@ from aiogram.utils.exceptions import TelegramAPIError
 
 logger = setup_logger(__name__)
 
-async def send_preview(bot: Bot, content: dict, reply_markup: InlineKeyboardMarkup, chat_id: int, edit_message_id: int = None, keep_content: bool = False):
-    logger.info(f"Sending preview to chat_id={chat_id}, edit_message_id={edit_message_id}, keep_content={keep_content}, content={content}")
+async def send_preview(
+    bot: Bot,
+    content: dict,
+    reply_markup: InlineKeyboardMarkup,
+    chat_id: int,
+    edit_message_id: int = None,
+    keep_content: bool = False
+):
+    logger.info(
+        f"Sending preview to chat_id={chat_id}, edit_message_id={edit_message_id}, "
+        f"keep_content={keep_content}, content={content}"
+    )
     try:
         if keep_content:
             message = await bot.send_message(
@@ -55,7 +66,7 @@ async def send_preview(bot: Bot, content: dict, reply_markup: InlineKeyboardMark
             )
         else:
             raise ValueError(f"Unsupported content type: {content['type']}")
-        
+
         logger.info(f"Preview sent successfully to chat_id={chat_id}, message_id={message.message_id}")
         return message
 
@@ -66,9 +77,22 @@ async def send_preview(bot: Bot, content: dict, reply_markup: InlineKeyboardMark
         logger.error(f"Unexpected error in send_preview: {str(e)}")
         raise
 
-async def send_to_channel(bot: Bot, content: dict, reply_markup: InlineKeyboardMarkup, channel_id: int, edit_message_id: int = None, keep_content: bool = False):
-    logger.info(f"Sending to channel_id={channel_id}, edit_message_id={edit_message_id}, keep_content={keep_content}, content={content}")
+
+async def send_to_channel(
+    bot: Bot,
+    content: dict,
+    reply_markup: InlineKeyboardMarkup,
+    channel_id: int,
+    edit_message_id: int = None,
+    keep_content: bool = False,
+    delete_after: int = None   # ⬅️ NEW: optional auto-delete time (seconds)
+):
+    logger.info(
+        f"Sending to channel_id={channel_id}, edit_message_id={edit_message_id}, "
+        f"keep_content={keep_content}, delete_after={delete_after}, content={content}"
+    )
     try:
+        # --- Edit only buttons ---
         if edit_message_id and keep_content:
             message = await bot.edit_message_reply_markup(
                 chat_id=channel_id,
@@ -77,6 +101,8 @@ async def send_to_channel(bot: Bot, content: dict, reply_markup: InlineKeyboardM
             )
             logger.info(f"Edited message {edit_message_id} in channel {channel_id}")
             return message
+
+        # --- Edit full message ---
         elif edit_message_id:
             if content["type"] == "text":
                 message = await bot.edit_message_text(
@@ -119,8 +145,8 @@ async def send_to_channel(bot: Bot, content: dict, reply_markup: InlineKeyboardM
             else:
                 raise ValueError(f"Unsupported content type: {content['type']}")
             logger.info(f"Edited message {edit_message_id} in channel {channel_id}")
-            return message
         else:
+            # --- Send new message ---
             if content["type"] == "text":
                 message = await bot.send_message(
                     chat_id=channel_id,
@@ -152,7 +178,21 @@ async def send_to_channel(bot: Bot, content: dict, reply_markup: InlineKeyboardM
             else:
                 raise ValueError(f"Unsupported content type: {content['type']}")
             logger.info(f"Sent new message to channel {channel_id}, message_id={message.message_id}")
-            return message
+
+        # --- Auto-delete if requested ---
+        if delete_after:
+            async def auto_delete():
+                try:
+                    await asyncio.sleep(delete_after)
+                    await bot.delete_message(chat_id=channel_id, message_id=message.message_id)
+                    logger.info(f"Deleted message {message.message_id} from channel {channel_id} after {delete_after}s")
+                except Exception as e:
+                    logger.error(f"Failed to delete message {message.message_id}: {e}")
+
+            asyncio.create_task(auto_delete())
+
+        return message
+
     except TelegramAPIError as e:
         logger.error(f"Error sending to channel (edit_message_id={edit_message_id}): {str(e)}")
         raise
