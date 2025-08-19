@@ -1054,7 +1054,7 @@ def register_handlers(dp: Dispatcher):
     dp.register_message_handler(
         receive_broadcast_message,
         content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
-        state=BroadcastState.waiting_for_message   # ✅ fixed
+        state=BroadcastState.WaitingForMessage   # ✅ fixed
     )
     # ❌ removed receive_broadcast_buttons (doesn’t exist anymore)
 
