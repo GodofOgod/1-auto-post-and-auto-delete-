@@ -2,6 +2,7 @@
 # Channel  : https://t.me/NxMirror
 # Contact  : @FTKrshna
 
+import asyncio
 from aiogram import types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -9,7 +10,7 @@ from aiogram.utils.exceptions import TelegramAPIError
 from bot.logger import setup_logger
 from ..helpers import is_authorized, send_preview, send_to_channel
 from ..modules import mongo_db
-from config import DEFAULT_CHANNELS
+from config import DEFAULT_CHANNELS, DELETE_TIME
 from .keyboards import create_channel_selection_keyboard, create_button_keyboard, create_confirm_keyboard
 from Scripts import FtKrshna
 
@@ -28,10 +29,15 @@ async def broadcast_command(message: types.Message, state: FSMContext, from_butt
         logger.warning(f"Unauthorized user {effective_user_id} attempted /broadcast")
         return
     try:
-        await message.reply(
+        msg = await message.reply(
             "Please send the message you want to broadcast (text, media, or media with captions).",
             reply_markup=create_channel_selection_keyboard([], show_back=False, show_close=True)
         )
+
+        # ✅ Auto-delete the bot’s prompt
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
+
         await BroadcastState.WaitingForMessage.set()
         await state.update_data(user_id=effective_user_id, flow="broadcast")
         logger.info(f"Prompted user {effective_user_id} for broadcast message")
@@ -64,11 +70,9 @@ async def get_all_channels(bot):
         logger.info("DEFAULT_CHANNELS not defined, using only database channels")
     return channels
 
-
 async def receive_broadcast_message(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     if message.from_user.id != user_data.get("user_id"):
-        logger.warning(f"User mismatch: {message.from_user.id} vs {user_data.get('user_id')}")
         return
 
     logger.info(f"Received broadcast message from user {message.from_user.id}: {message.text if message.text else message.content_type}")
@@ -90,115 +94,128 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
         content["file_id"] = message.document.file_id
         content["caption"] = message.caption or ""
     else:
-        await message.reply("Unsupported content type. Please send text, photo, video, or document.")
-        logger.error(f"Unsupported content type from user {message.from_user.id}")
+        msg = await message.reply("Unsupported content type. Please send text, photo, video, or document.")
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
         await state.finish()
         return
 
     try:
         await state.update_data(content=content)
-        await message.reply(
+        msg = await message.reply(
             FtKrshna.DEFAULT_BUTTONS_TEXT,
             parse_mode=types.ParseMode.MARKDOWN,
             reply_markup=create_channel_selection_keyboard([], show_back=True, show_close=True)
         )
+
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
+
         await BroadcastState.WaitingForButtons.set()
-        logger.info(f"Prompted user {message.from_user.id} for broadcast buttons")
     except Exception as e:
         await message.reply("Error processing message.")
-        logger.error(f"Error in receive_broadcast_message: {str(e)}")
         await state.finish()
 
 async def receive_broadcast_buttons(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     if message.from_user.id != user_data.get("user_id"):
-        logger.warning(f"User mismatch: {message.from_user.id} vs {user_data.get('user_id')}")
         return
-    current_state = await state.get_state()
-    logger.info(f"Received broadcast buttons from user {message.from_user.id} in state {current_state}: {message.text}")
-    if current_state != BroadcastState.WaitingForButtons.state:
-        logger.warning(f"Unexpected state {current_state} for user {message.from_user.id}")
-        await message.reply("Bot is in an unexpected state. Please start over with /broadcast or use /cancel.")
-        await state.finish()
-        return
+
     content = user_data.get("content")
     if not content:
-        await message.reply("Error: No message content found. Please start over with /broadcast.")
-        logger.error(f"No content found for user {message.from_user.id}")
+        msg = await message.reply("Error: No message content found. Please start over with /broadcast.")
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
         await state.finish()
         return
+
     try:
         reply_markup = None
-        if message.text.lower() == "none":
-            logger.info(f"User {message.from_user.id} chose no buttons")
-        else:
+        if message.text.lower() != "none":
             reply_markup = create_button_keyboard(message.text, for_preview=True)
-            logger.debug(f"Generated preview reply_markup for user {message.from_user.id}: {reply_markup}")
+
         preview_message = await send_preview(message.bot, content, reply_markup, message.chat.id)
+
+        # ✅ Auto-delete preview message
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, preview_message.chat.id, preview_message.message_id))
+
         await state.update_data(preview_message_id=preview_message.message_id, reply_markup=reply_markup)
-        await message.reply(
+
+        confirm_msg = await message.reply(
             "Preview sent. Please confirm to broadcast to all channels or cancel:",
             reply_markup=create_confirm_keyboard()
         )
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, confirm_msg.chat.id, confirm_msg.message_id))
+
         await BroadcastState.WaitingForPreview.set()
-        logger.info(f"Sent broadcast preview to user {message.from_user.id}")
-    except TelegramAPIError as e:
-        await message.reply(f"Error sending preview: {str(e)}")
-        logger.error(f"TelegramAPIError in receive_broadcast_buttons: {str(e)}")
-        await state.finish()
-    except ValueError as e:
-        await message.reply("Invalid button format. Please use the specified format or send 'none'.")
-        logger.error(f"ValueError in receive_broadcast_buttons: {str(e)}")
-        await state.finish()
     except Exception as e:
-        await message.reply("Error processing buttons. Please try again or use /cancel.")
-        logger.error(f"Unexpected error in receive_broadcast_buttons: {str(e)}")
+        msg = await message.reply("Error processing buttons. Please try again.")
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
         await state.finish()
 
 async def handle_broadcast_confirmation(callback_query: types.CallbackQuery, state: FSMContext):
     user_data = await state.get_data()
     if callback_query.from_user.id != user_data.get("user_id"):
         await callback_query.answer()
-        logger.warning(f"User mismatch in broadcast confirmation: {callback_query.from_user.id} vs {user_data.get('user_id')}")
         return
-    logger.info(f"Received broadcast confirmation from user {callback_query.from_user.id}: {callback_query.data}")
+
     content = user_data.get("content")
     reply_markup = user_data.get("reply_markup")
-    preview_message_id = user_data.get("preview_message_id")
+
     try:
         if callback_query.data == "confirm_post":
             channels = await get_all_channels(callback_query.bot)
             if not channels:
-                await callback_query.message.reply("No channels available for broadcasting.")
-                logger.info("No channels found for broadcast")
+                msg = await callback_query.message.reply("No channels available for broadcasting.")
+                if DELETE_TIME > 0:
+                    asyncio.create_task(delete_after_delay(callback_query.bot, msg.chat.id, msg.message_id))
                 await state.finish()
                 return
+
             success_count = 0
             failed_channels = []
             for channel in channels:
                 channel_id = channel["channel_id"]
                 try:
-                    await send_to_channel(callback_query.bot, content, reply_markup, channel_id)
+                    sent_msg = await send_to_channel(callback_query.bot, content, reply_markup, channel_id)
                     success_count += 1
-                    logger.info(f"Broadcasted message to channel {channel_id}")
+
+                    # ✅ Auto-delete broadcasted message
+                    if sent_msg and DELETE_TIME > 0:
+                        asyncio.create_task(delete_after_delay(callback_query.bot, channel_id, sent_msg.message_id))
+
                 except TelegramAPIError as e:
                     failed_channels.append((channel_id, str(e)))
-                    logger.error(f"Failed to broadcast to channel {channel_id}: {str(e)}")
-            response = f"Broadcast completed: {success_count}/{len(channels)} channels successful."
+
+            response = f"✅ Broadcast completed: {success_count}/{len(channels)} successful."
             if failed_channels:
-                response += "\nFailed channels:\n" + "\n".join(f"{ch[0]}: {ch[1]}" for ch in failed_channels)
-            await callback_query.message.reply(response)
+                response += "\n❌ Failed:\n" + "\n".join(f"{ch[0]}: {ch[1]}" for ch in failed_channels)
+
+            msg = await callback_query.message.reply(response)
+            if DELETE_TIME > 0:
+                asyncio.create_task(delete_after_delay(callback_query.bot, msg.chat.id, msg.message_id))
+
         else:
-            await callback_query.message.reply("Broadcast canceled.")
-            logger.info(f"Broadcast canceled by user {callback_query.from_user.id}")
-        try:
-            await callback_query.bot.delete_message(chat_id=callback_query.message.chat.id, message_id=preview_message_id)
-        except Exception as e:
-            logger.warning(f"Failed to delete preview message: {str(e)}")
-        await callback_query.message.delete()
+            msg = await callback_query.message.reply("Broadcast canceled.")
+            if DELETE_TIME > 0:
+                asyncio.create_task(delete_after_delay(callback_query.bot, msg.chat.id, msg.message_id))
+
         await state.finish()
         await callback_query.answer()
+
     except Exception as e:
-        await callback_query.message.reply("Error processing broadcast confirmation.")
-        logger.error(f"Unexpected error in handle_broadcast_confirmation: {str(e)}")
+        msg = await callback_query.message.reply("Error processing broadcast confirmation.")
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(callback_query.bot, msg.chat.id, msg.message_id))
         await state.finish()
+
+# ✅ Helper for delayed deletion
+async def delete_after_delay(bot, chat_id, message_id):
+    try:
+        await asyncio.sleep(DELETE_TIME)
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
