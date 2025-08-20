@@ -19,23 +19,29 @@ class BroadcastState(StatesGroup):
 
 # ========================= SEND MESSAGE FUNCTION =========================
 async def send_to_channel_v2(bot, content: dict, channel_id: int):
-    """Send content to a channel."""
+    """Send content to a channel and optionally delete after DELETE_TIME."""
     try:
         ctype = content.get("type")
+        sent_msg = None
+
         if ctype == "text":
-            await bot.send_message(channel_id, content.get("text", ""), parse_mode=types.ParseMode.HTML)
+            sent_msg = await bot.send_message(channel_id, content.get("text", ""), parse_mode=types.ParseMode.HTML)
         elif ctype == "photo":
-            await bot.send_photo(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+            sent_msg = await bot.send_photo(channel_id, content.get("file_id"), caption=content.get("caption", ""))
         elif ctype == "video":
-            await bot.send_video(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+            sent_msg = await bot.send_video(channel_id, content.get("file_id"), caption=content.get("caption", ""))
         elif ctype == "document":
-            await bot.send_document(channel_id, content.get("file_id"), caption=content.get("caption", ""))
-        else:
-            return False
+            sent_msg = await bot.send_document(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+
+        # Schedule deletion in channel
+        if DELETE_TIME > 0 and sent_msg:
+            asyncio.create_task(delete_after_delay(bot, channel_id, sent_msg.message_id))
+
         return True
     except Exception as e:
         logger.error(f"Error sending to channel {channel_id}: {str(e)}")
         return False
+
 
 # ========================= DELETE HELPER =========================
 async def delete_after_delay(bot, chat_id, message_id):
