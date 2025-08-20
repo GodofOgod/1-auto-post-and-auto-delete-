@@ -6,10 +6,8 @@ import asyncio
 from aiogram import types
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.utils.exceptions import TelegramAPIError
-
 from bot.logger import setup_logger
-from ..helpers import is_authorized, send_preview, send_to_channel
+from ..helpers import is_authorized
 from ..modules import mongo_db
 from config import DEFAULT_CHANNELS, DELETE_TIME
 
@@ -19,73 +17,59 @@ logger = setup_logger(__name__)
 class BroadcastState(StatesGroup):
     WaitingForMessage = State()
 
-# ========================= COMMAND =========================
-async def broadcast_command(message: types.Message, state: FSMContext, from_button=False, user_id=None):
-    effective_user_id = user_id or message.from_user.id
-    logger.info(f"Received /broadcast from user {effective_user_id} (from_button={from_button})")
+# ========================= SEND MESSAGE FUNCTION (v2 compatible) =========================
+async def send_to_channel_v2(bot, content: dict, channel_id: int):
+    """Send content to a channel, compatible with Aiogram v2."""
+    try:
+        ctype = content.get("type")
+        if ctype == "text":
+            await bot.send_message(channel_id, content.get("text", ""), parse_mode=types.ParseMode.HTML)
+        elif ctype == "photo":
+            await bot.send_photo(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+        elif ctype == "video":
+            await bot.send_video(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+        elif ctype == "document":
+            await bot.send_document(channel_id, content.get("file_id"), caption=content.get("caption", ""))
+        else:
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error sending to channel {channel_id}: {str(e)}")
+        return False
 
-    if not is_authorized(effective_user_id):
+# ========================= BROADCAST COMMAND =========================
+async def broadcast_command(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    if not is_authorized(user_id):
         await message.reply("❌ You are not authorized to use this command.")
-        logger.warning(f"Unauthorized user {effective_user_id} attempted /broadcast")
         return
 
-    try:
-        # ------------------ Method 1: Reply message ------------------
-        if message.reply_to_message:
-            reply_msg = message.reply_to_message
-            channels = await get_all_channels(message.bot)
-            sent, failed = 0, []
+    data = await state.get_data()
+    saved_content = data.get("content")
 
-            for ch in channels:
-                try:
-                    await reply_msg.copy(chat_id=ch["channel_id"])
-                    sent += 1
-                except Exception as e:
-                    failed.append((ch["channel_id"], str(e)))
+    if saved_content:
+        # Method 1: Send already saved message
+        channels = await get_all_channels(message.bot)
+        success, fail = 0, []
+        for ch in channels:
+            sent = await send_to_channel_v2(message.bot, saved_content, ch["channel_id"])
+            if sent:
+                success += 1
+            else:
+                fail.append(ch["channel_id"])
 
-            result = f"✅ Broadcast finished: {sent}/{len(channels)} successful."
-            if failed:
-                result += "\n❌ Failed:\n" + "\n".join(f"{c}: {err}" for c, err in failed)
-
-            await message.reply(result)
-            return
-
-        # ------------------ Method 2: Ask for new message ------------------
-        msg = await message.reply("Please send the message you want to broadcast (text, media, or media with captions).")
+        result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
+        if fail:
+            result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
+        await message.reply(result)
+        await state.finish()
+    else:
+        # Method 2: Ask admin to send message
+        msg = await message.reply("📣 Please send the message you want to broadcast (text, photo, video, or document).")
         if DELETE_TIME > 0:
             asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
-
         await BroadcastState.WaitingForMessage.set()
-        await state.update_data(user_id=effective_user_id)
-        logger.info(f"Prompted user {effective_user_id} for broadcast message")
-
-    except Exception as e:
-        await message.reply("❌ Error starting broadcast.")
-        logger.error(f"Error in /broadcast: {str(e)}")
-        await state.finish()
-
-# ========================= CHANNELS =========================
-async def get_all_channels(bot):
-    db_channels = await mongo_db.get_channels()
-    channels = db_channels if db_channels else []
-    default_channels = []
-
-    if DEFAULT_CHANNELS:
-        for channel_id in DEFAULT_CHANNELS:
-            try:
-                chat = await bot.get_chat(channel_id)
-                if chat.type == "channel":
-                    default_channels.append({"channel_id": channel_id, "title": chat.title})
-            except TelegramAPIError as e:
-                logger.error(f"Error fetching default channel {channel_id}: {str(e)}")
-
-        existing_ids = {ch["channel_id"] for ch in channels}
-        for def_ch in default_channels:
-            if def_ch["channel_id"] not in existing_ids:
-                channels.append(def_ch)
-
-    logger.info(f"Total channels available for broadcast: {len(channels)}")
-    return channels
+        await state.update_data(user_id=user_id)
 
 # ========================= RECEIVE BROADCAST MESSAGE =========================
 async def receive_broadcast_message(message: types.Message, state: FSMContext):
@@ -93,6 +77,7 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
     if message.from_user.id != user_data.get("user_id"):
         return
 
+    # Build content dict
     content = {}
     if message.text:
         content["type"] = "text"
@@ -110,36 +95,46 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
         content["file_id"] = message.document.file_id
         content["caption"] = message.caption or ""
     else:
-        msg = await message.reply("❌ Unsupported content type. Send text, photo, video, or document.")
-        if DELETE_TIME > 0:
-            asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
+        await message.reply("❌ Unsupported content type. Send text, photo, video, or document.")
         await state.finish()
         return
 
     await state.update_data(content=content)
 
-    # Show preview
-    preview_msg = await send_preview(message.bot, content, None, message.chat.id)
-    if DELETE_TIME > 0:
-        asyncio.create_task(delete_after_delay(message.bot, preview_msg.chat.id, preview_msg.message_id))
-
-    # Broadcast immediately
+    # Send immediately
     channels = await get_all_channels(message.bot)
-    sent, failed = 0, []
-
+    success, fail = 0, []
     for ch in channels:
-        try:
-            await send_to_channel(message.bot, content, None, ch["channel_id"])
-            sent += 1
-        except TelegramAPIError as e:
-            failed.append((ch["channel_id"], str(e)))
+        sent = await send_to_channel_v2(message.bot, content, ch["channel_id"])
+        if sent:
+            success += 1
+        else:
+            fail.append(ch["channel_id"])
 
-    result = f"✅ Broadcast finished: {sent}/{len(channels)} successful."
-    if failed:
-        result += "\n❌ Failed:\n" + "\n".join(f"{c}: {err}" for c, err in failed)
-
+    result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
+    if fail:
+        result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
     await message.reply(result)
     await state.finish()
+
+# ========================= GET CHANNELS =========================
+async def get_all_channels(bot):
+    db_channels = await mongo_db.get_channels()
+    channels = db_channels if db_channels else []
+    default_channels = []
+    if DEFAULT_CHANNELS:
+        for ch_id in DEFAULT_CHANNELS:
+            try:
+                chat = await bot.get_chat(ch_id)
+                if chat.type == "channel":
+                    default_channels.append({"channel_id": ch_id, "title": chat.title})
+            except:
+                continue
+        channel_ids = {ch["channel_id"] for ch in channels}
+        for ch in default_channels:
+            if ch["channel_id"] not in channel_ids:
+                channels.append(ch)
+    return channels
 
 # ========================= DELETE HELPER =========================
 async def delete_after_delay(bot, chat_id, message_id):
