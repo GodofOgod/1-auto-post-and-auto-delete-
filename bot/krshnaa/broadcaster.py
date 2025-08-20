@@ -217,10 +217,7 @@ async def schedule_worker(bot):
             content = sched["content"]
             channels = await get_all_channels(bot)
             for channel in channels:
-                try:
-                    await send_to_channel(bot, content, None, channel["channel_id"])
-                except Exception as e:
-                    logger.error(f"Failed schedule {sched['_id']} -> {channel['channel_id']}: {e}")
+                await send_to_channel(bot, content, None, channel["channel_id"])
             await mongo_db.mark_done(str(sched["_id"]))
         await asyncio.sleep(30)  # check every 30 sec
 
