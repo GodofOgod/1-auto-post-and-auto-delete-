@@ -47,8 +47,47 @@ async def broadcast_command(message: types.Message, state: FSMContext):
     data = await state.get_data()
     saved_content = data.get("content")
 
-    if saved_content:
-        # Method 1: Send already saved message
+    # ✅ Check if admin replied to a message
+    if message.reply_to_message:
+        reply_msg = message.reply_to_message
+        content = {}
+        if reply_msg.text:
+            content["type"] = "text"
+            content["text"] = reply_msg.text
+        elif reply_msg.photo:
+            content["type"] = "photo"
+            content["file_id"] = reply_msg.photo[-1].file_id
+            content["caption"] = reply_msg.caption or ""
+        elif reply_msg.video:
+            content["type"] = "video"
+            content["file_id"] = reply_msg.video.file_id
+            content["caption"] = reply_msg.caption or ""
+        elif reply_msg.document:
+            content["type"] = "document"
+            content["file_id"] = reply_msg.document.file_id
+            content["caption"] = reply_msg.caption or ""
+        else:
+            await message.reply("❌ Unsupported content type in reply.")
+            return
+
+        # Send broadcast immediately
+        channels = await get_all_channels(message.bot)
+        success, fail = 0, []
+        for ch in channels:
+            sent = await send_to_channel_v2(message.bot, content, ch["channel_id"])
+            if sent:
+                success += 1
+            else:
+                fail.append(ch["channel_id"])
+
+        result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
+        if fail:
+            result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
+        await message.reply(result)
+        return
+
+    # ✅ If already saved in state, send it
+    elif saved_content:
         channels = await get_all_channels(message.bot)
         success, fail = 0, []
         for ch in channels:
@@ -63,13 +102,16 @@ async def broadcast_command(message: types.Message, state: FSMContext):
             result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
         await message.reply(result)
         await state.finish()
+        return
+
+    # ✅ Else ask admin to send a message
     else:
-        # Method 2: Ask admin to send message
         msg = await message.reply("📣 Please send the message you want to broadcast (text, photo, video, or document).")
         if DELETE_TIME > 0:
             asyncio.create_task(delete_after_delay(message.bot, msg.chat.id, msg.message_id))
         await BroadcastState.WaitingForMessage.set()
         await state.update_data(user_id=user_id)
+
 
 # ========================= RECEIVE BROADCAST MESSAGE =========================
 async def receive_broadcast_message(message: types.Message, state: FSMContext):
