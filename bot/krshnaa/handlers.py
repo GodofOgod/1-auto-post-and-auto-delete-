@@ -968,6 +968,8 @@ async def fallback_handler(message: types.Message, state: FSMContext):
 
 def register_handlers(dp: Dispatcher):
     logger.info("Registering handlers")
+
+    # ---------------- COMMANDS ----------------
     dp.register_message_handler(start_command, commands=["start"])
     dp.register_message_handler(help_command, commands=["help"])
     dp.register_message_handler(add_channel_command, commands=["add"])
@@ -977,6 +979,7 @@ def register_handlers(dp: Dispatcher):
     dp.register_message_handler(set_default_buttons_command, commands=["setdefaultbtns"])
     dp.register_message_handler(cancel_command, commands=["cancel"])
 
+    # ---------------- CALLBACKS ----------------
     dp.register_callback_query_handler(
         start_button_callback,
         lambda c: c.data in [
@@ -1014,25 +1017,16 @@ def register_handlers(dp: Dispatcher):
             EditState.WaitingForContent,
             EditState.WaitingForButtons,
             EditState.WaitingForPreview,
-            BroadcastState.WaitingForMessage,   # ✅ keep only this
+            BroadcastState.WaitingForMessage,   # ✅ only this
             DefaultButtonsState.WaitingForButtons
         ]
     )
-    dp.register_callback_query_handler(
-        cancel_action,
-        lambda c: c.data == "cancel_action",
-        state="*"
-    )
-    dp.register_callback_query_handler(
-        close_message,
-        lambda c: c.data == "close_message",
-        state="*"
-    )
+    dp.register_callback_query_handler(cancel_action, lambda c: c.data == "cancel_action", state="*")
+    dp.register_callback_query_handler(close_message, lambda c: c.data == "close_message", state="*")
     dp.register_callback_query_handler(debug_callback)
+    dp.register_callback_query_handler(button_callback, lambda c: c.data.startswith(("popup:", "alert:")))
 
-    # ------------------------
-    # 🚀 BROADCAST HANDLERS
-    # ------------------------
+    # ---------------- BROADCAST HANDLERS ----------------
     dp.register_message_handler(
         receive_broadcast_message,
         content_types=[
@@ -1044,35 +1038,21 @@ def register_handlers(dp: Dispatcher):
         state=BroadcastState.WaitingForMessage
     )
 
-    # ------------------------
-    # OTHER EXISTING HANDLERS
-    # ------------------------
+    # ---------------- POST / EDIT HANDLERS ----------------
     dp.register_message_handler(
         receive_post_message,
         content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
         state=PostState.WaitingForMessage
     )
-    dp.register_message_handler(
-        receive_post_buttons,
-        content_types=[types.ContentType.TEXT],
-        state=PostState.WaitingForButtons
-    )
+    dp.register_message_handler(receive_post_buttons, content_types=[types.ContentType.TEXT], state=PostState.WaitingForButtons)
     dp.register_message_handler(receive_message_id, state=EditState.WaitingForMessageId)
     dp.register_message_handler(
         receive_edit_content,
         content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
         state=EditState.WaitingForContent
     )
-    dp.register_message_handler(
-        receive_edit_buttons,
-        content_types=[types.ContentType.TEXT],
-        state=EditState.WaitingForButtons
-    )
-    dp.register_message_handler(
-        receive_default_buttons,
-        content_types=[types.ContentType.TEXT],
-        state=DefaultButtonsState.WaitingForButtons
-    )
+    dp.register_message_handler(receive_edit_buttons, content_types=[types.ContentType.TEXT], state=EditState.WaitingForButtons)
+    dp.register_message_handler(receive_default_buttons, content_types=[types.ContentType.TEXT], state=DefaultButtonsState.WaitingForButtons)
     dp.register_callback_query_handler(
         handle_preview_confirmation,
         lambda c: c.data in ["confirm_post", "cancel_action"],
@@ -1083,9 +1063,6 @@ def register_handlers(dp: Dispatcher):
         lambda c: c.data in ["confirm_post", "cancel_action"],
         state=EditState.WaitingForPreview
     )
-    dp.register_callback_query_handler(
-        button_callback,
-        lambda c: c.data.startswith(("popup:", "alert:"))
-    )
-    dp.register_message_handler(fallback_handler)
 
+    # ---------------- FALLBACK ----------------
+    dp.register_message_handler(fallback_handler)
