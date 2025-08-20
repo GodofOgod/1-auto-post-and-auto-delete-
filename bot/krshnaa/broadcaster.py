@@ -17,9 +17,9 @@ logger = setup_logger(__name__)
 class BroadcastState(StatesGroup):
     WaitingForMessage = State()
 
-# ========================= SEND MESSAGE FUNCTION (v2 compatible) =========================
+# ========================= SEND MESSAGE FUNCTION =========================
 async def send_to_channel_v2(bot, content: dict, channel_id: int):
-    """Send content to a channel, compatible with Aiogram v2."""
+    """Send content to a channel."""
     try:
         ctype = content.get("type")
         if ctype == "text":
@@ -37,6 +37,34 @@ async def send_to_channel_v2(bot, content: dict, channel_id: int):
         logger.error(f"Error sending to channel {channel_id}: {str(e)}")
         return False
 
+# ========================= DELETE HELPER =========================
+async def delete_after_delay(bot, chat_id, message_id):
+    try:
+        await asyncio.sleep(DELETE_TIME)
+        await bot.delete_message(chat_id, message_id)
+        logger.info(f"Deleted message {message_id} in chat {chat_id}")
+    except Exception as e:
+        logger.warning(f"Failed to delete message {message_id} in chat {chat_id}: {e}")
+
+# ========================= GET CHANNELS =========================
+async def get_all_channels(bot):
+    db_channels = await mongo_db.get_channels()
+    channels = db_channels if db_channels else []
+    default_channels = []
+    if DEFAULT_CHANNELS:
+        for ch_id in DEFAULT_CHANNELS:
+            try:
+                chat = await bot.get_chat(ch_id)
+                if chat.type == "channel":
+                    default_channels.append({"channel_id": ch_id, "title": chat.title})
+            except:
+                continue
+        channel_ids = {ch["channel_id"] for ch in channels}
+        for ch in default_channels:
+            if ch["channel_id"] not in channel_ids:
+                channels.append(ch)
+    return channels
+
 # ========================= BROADCAST COMMAND =========================
 async def broadcast_command(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -47,7 +75,7 @@ async def broadcast_command(message: types.Message, state: FSMContext):
     data = await state.get_data()
     saved_content = data.get("content")
 
-    # ✅ Check if admin replied to a message
+    # -------------------- REPLY-TO MESSAGE --------------------
     if message.reply_to_message:
         reply_msg = message.reply_to_message
         content = {}
@@ -70,7 +98,11 @@ async def broadcast_command(message: types.Message, state: FSMContext):
             await message.reply("❌ Unsupported content type in reply.")
             return
 
-        # Send broadcast immediately
+        # Delete admin's reply message automatically
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, reply_msg.chat.id, reply_msg.message_id))
+
+        # Broadcast immediately
         channels = await get_all_channels(message.bot)
         success, fail = 0, []
         for ch in channels:
@@ -83,10 +115,12 @@ async def broadcast_command(message: types.Message, state: FSMContext):
         result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
         if fail:
             result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
-        await message.reply(result)
+        result_msg = await message.reply(result)
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, result_msg.chat.id, result_msg.message_id))
         return
 
-    # ✅ If already saved in state, send it
+    # -------------------- SAVED MESSAGE IN STATE --------------------
     elif saved_content:
         channels = await get_all_channels(message.bot)
         success, fail = 0, []
@@ -100,11 +134,13 @@ async def broadcast_command(message: types.Message, state: FSMContext):
         result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
         if fail:
             result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
-        await message.reply(result)
+        result_msg = await message.reply(result)
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, result_msg.chat.id, result_msg.message_id))
         await state.finish()
         return
 
-    # ✅ Else ask admin to send a message
+    # -------------------- ASK ADMIN FOR NEW MESSAGE --------------------
     else:
         msg = await message.reply("📣 Please send the message you want to broadcast (text, photo, video, or document).")
         if DELETE_TIME > 0:
@@ -112,14 +148,12 @@ async def broadcast_command(message: types.Message, state: FSMContext):
         await BroadcastState.WaitingForMessage.set()
         await state.update_data(user_id=user_id)
 
-
 # ========================= RECEIVE BROADCAST MESSAGE =========================
 async def receive_broadcast_message(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     if message.from_user.id != user_data.get("user_id"):
         return
 
-    # Build content dict
     content = {}
     if message.text:
         content["type"] = "text"
@@ -137,9 +171,15 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
         content["file_id"] = message.document.file_id
         content["caption"] = message.caption or ""
     else:
-        await message.reply("❌ Unsupported content type. Send text, photo, video, or document.")
+        error_msg = await message.reply("❌ Unsupported content type. Send text, photo, video, or document.")
+        if DELETE_TIME > 0:
+            asyncio.create_task(delete_after_delay(message.bot, error_msg.chat.id, error_msg.message_id))
         await state.finish()
         return
+
+    # Delete admin's message automatically
+    if DELETE_TIME > 0:
+        asyncio.create_task(delete_after_delay(message.bot, message.chat.id, message.message_id))
 
     await state.update_data(content=content)
 
@@ -156,32 +196,8 @@ async def receive_broadcast_message(message: types.Message, state: FSMContext):
     result = f"✅ Broadcast finished: {success}/{len(channels)} successful."
     if fail:
         result += "\n❌ Failed:\n" + "\n".join(str(cid) for cid in fail)
-    await message.reply(result)
+    result_msg = await message.reply(result)
+    if DELETE_TIME > 0:
+        asyncio.create_task(delete_after_delay(message.bot, result_msg.chat.id, result_msg.message_id))
+
     await state.finish()
-
-# ========================= GET CHANNELS =========================
-async def get_all_channels(bot):
-    db_channels = await mongo_db.get_channels()
-    channels = db_channels if db_channels else []
-    default_channels = []
-    if DEFAULT_CHANNELS:
-        for ch_id in DEFAULT_CHANNELS:
-            try:
-                chat = await bot.get_chat(ch_id)
-                if chat.type == "channel":
-                    default_channels.append({"channel_id": ch_id, "title": chat.title})
-            except:
-                continue
-        channel_ids = {ch["channel_id"] for ch in channels}
-        for ch in default_channels:
-            if ch["channel_id"] not in channel_ids:
-                channels.append(ch)
-    return channels
-
-# ========================= DELETE HELPER =========================
-async def delete_after_delay(bot, chat_id, message_id):
-    try:
-        await asyncio.sleep(DELETE_TIME)
-        await bot.delete_message(chat_id, message_id)
-    except Exception:
-        pass
