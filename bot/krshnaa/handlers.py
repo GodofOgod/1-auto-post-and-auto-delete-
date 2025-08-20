@@ -24,9 +24,7 @@ from ..helpers import is_authorized, send_preview, send_to_channel
 from .broadcaster import (
     broadcast_command,
     BroadcastState,
-    receive_broadcast_message,
-    handle_broadcast_choice,   # ✅ add this
-    receive_schedule_time      # ✅ and this
+    receive_broadcast_message
 )
 
 logger = setup_logger(__name__)
@@ -1016,7 +1014,7 @@ def register_handlers(dp: Dispatcher):
             EditState.WaitingForContent,
             EditState.WaitingForButtons,
             EditState.WaitingForPreview,
-            BroadcastState.WaitingForMessage,   # ✅ correct
+            BroadcastState.WaitingForMessage,   # ✅ keep only this
             DefaultButtonsState.WaitingForButtons
         ]
     )
@@ -1037,22 +1035,13 @@ def register_handlers(dp: Dispatcher):
     # ------------------------
     dp.register_message_handler(
         receive_broadcast_message,
-        content_types=[types.ContentType.TEXT, types.ContentType.PHOTO, types.ContentType.VIDEO, types.ContentType.DOCUMENT],
+        content_types=[
+            types.ContentType.TEXT,
+            types.ContentType.PHOTO,
+            types.ContentType.VIDEO,
+            types.ContentType.DOCUMENT
+        ],
         state=BroadcastState.WaitingForMessage
-    )
-
-    # ✅ NEW: Send Now / Schedule choice
-    dp.register_callback_query_handler(
-        handle_broadcast_choice,
-        lambda c: c.data in ["broadcast_send_now", "broadcast_schedule"],
-        state=BroadcastState.WaitingForMessage
-    )
-
-    # ✅ NEW: Schedule time input
-    dp.register_message_handler(
-        receive_schedule_time,
-        content_types=[types.ContentType.TEXT],
-        state=BroadcastState.WaitingForScheduleTime
     )
 
     # ------------------------
@@ -1099,3 +1088,4 @@ def register_handlers(dp: Dispatcher):
         lambda c: c.data.startswith(("popup:", "alert:"))
     )
     dp.register_message_handler(fallback_handler)
+
