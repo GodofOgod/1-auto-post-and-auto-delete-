@@ -5,7 +5,7 @@ from os import environ
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8356551419:AAGFZnpBbEaYeUh-t2CP-XGU3gMazpHX_pw")
 
 # List of authorized user IDs (Admins)
-AUTHORIZED_USERS = list(map(int, os.environ.get("AUTHORIZED_USERS", "1397269319,1489652480").split(",")))      #For Example 123456,123456
+AUTHORIZED_USERS = list(map(int, os.environ.get("AUTHORIZED_USERS", "1397269319,6906650389").split(",")))      #For Example 123456,123456
 
 # MongoDB URL and DB name
 DB_URL = os.environ.get("DB_URL", "mongodb+srv://wemedia360:Ex3pPKO0PNBWcI6k@channelbroadcastbot.pqhuvuc.mongodb.net/?retryWrites=true&w=majority&appName=Channelbroadcastbot")
