@@ -15,4 +15,4 @@ DB_NAME = os.environ.get("DB_NAME", "Channelbroadcastbot")
 # You can add unlimited channel directy from bot)
 DEFAULT_CHANNELS = list(map(int, os.environ.get("DEFAULT_CHANNELS", "-1002708988775,-1002524893260,-1002293619404,-1002447252037,-1002617751817,-1002599212023,-1002783719315").split(",")))      #-1001234567890,-1009876543210  For Example
 
-DELETE_TIME = int(environ.get("DELETE_TIME", "30"))  #  deletion time in seconds (default: 5 minutes). Adjust as per your needs.
+DELETE_TIME = int(environ.get("DELETE_TIME", "3600"))  #  deletion time in seconds (default: 5 minutes). Adjust as per your needs.
